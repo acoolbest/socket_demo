@@ -12,6 +12,8 @@
 #include <string.h>
 #include <mutex>
 #include <signal.h>
+#include <random>
+#include <vector>
 
 using namespace std;
 
@@ -64,7 +66,7 @@ class socket_help{
 			}
 		}
 		
-		int send_data(char * data, uint16_t len)
+		int send_data(uint8_t * data, uint16_t len)
 		{	
 			std::unique_lock<std::mutex> lok(send_mutex);
 			if(send(sockfd, data, len, 0) < 0)
@@ -92,53 +94,180 @@ class socket_help{
 		static void read_thread(void *arg)
 		{
 			socket_help * sh = (socket_help *)arg;
-			int sockfd = sh->sockfd;
-			uint16_t cli_index = sh->cli_index;
-
-			char buf[256] = {0};
+			uint8_t buf[256] = {0};
 			int recv_len;
+			
+			uint16_t function_code = 0;
+			uint16_t msg_id = 0;
+			uint16_t terminal_len = 0;
+			uint8_t terminal_id[32] = {0};
+			uint16_t rfid_len = 0;
+			uint8_t rfid_id[32] = {0};
+			uint8_t addr = 0;
+
 			while(1)
 			{
 				memset(buf,0,sizeof(buf));
-				if((recv_len = recv(sockfd, buf, sizeof(buf), 0)) == -1)
+				if((recv_len = recv(sh->sockfd, buf, sizeof(buf), 0)) == -1)
 				{
 					if(errno==EAGAIN)
 					{
-						printf("[%d] recv timeout\n", cli_index);
+						;//printf("[%d] recv timeout\n", sh->cli_index);
 					}
 					else
 					{
-						printf("[%d] recv error, server crash\n", cli_index);
+						printf("[%d] recv error, server crash\n", sh->cli_index);
 						break;
 					}
 					
 				}
 				if(recv_len>0)
 				{
-					printf("[%d] recv data: ", cli_index);
+					printf("[%d] recv data: ", sh->cli_index);
 					for(int i=0;i<recv_len;i++)
 					{
 						printf("%02x ", buf[i]);
 					}
 					printf("\n");
+					#if 0
+					00 01 00 1E 00 00 00 0A 38 70 
+					71 7A 41 6E 79 64 51 68 00 08 
+					66 63 31 4E 75 56 4C 4B 00 01 
+					#endif
+					function_code = ((uint16_t)buf[0]) << 8 | buf[1];
+					if(function_code != 0x0101) continue;
+					msg_id = ((uint16_t)buf[4]) << 8 | buf[5];
+					terminal_len = ((uint16_t)buf[6]) << 8 | buf[7];
+					terminal_id[32] = {0};
+					memcpy(terminal_id, &buf[8], terminal_len);
+					terminal_id[terminal_len] = '\0';
+					rfid_len = ((uint16_t)buf[8+terminal_len]) << 8 | buf[8+terminal_len+1];
+					rfid_id[32] = {0};
+					memcpy(rfid_id, &buf[8+terminal_len+1+1], rfid_len);
+					rfid_id[rfid_len] = '\0';
+					addr = buf[8+terminal_len+1+1+rfid_len];
+					
+					if(terminal_len == sh->terminal_id.length()
+						&& !memcmp(terminal_id, sh->terminal_id.c_str(), terminal_len)
+						&& addr < sh->rfid_id.size()
+						&& rfid_len == sh->rfid_id[addr].length()
+						&& !memcmp(rfid_id, sh->rfid_id[addr].c_str(), rfid_len))
+					{
+						buf[1] = 0x01;
+						buf[recv_len] = 0x00;
+						buf[3] = recv_len+1;
+						printf("[%d] read_thread msg_id[%04x], rfid_len[%04x], rfid_id[index %d][%s] addr[index %d][%02x], result_code[0x00]\n", 
+							sh->cli_index,
+							msg_id,
+							rfid_len,
+							8+terminal_len+1+1,
+							rfid_id,
+							8+terminal_len+1+1+rfid_len,
+							addr);
+					}
+					else 
+					{
+						buf[1] = 0x01;
+						buf[recv_len] = 0x01;
+						buf[3] = recv_len+1;
+
+						printf("[%d] read_thread function_code[%04x],msg_id[%04x], terminal_len[%04x], terminal_id[%s], rfid_len[%04x], rfid_id[index %d][%s] addr[index %d][%02x], result_code[0x01]\n", 
+							sh->cli_index,
+							function_code,
+							msg_id,
+							terminal_len,
+							terminal_id,
+							rfid_len,
+							8+terminal_len+1+1,
+							rfid_id,
+							8+terminal_len+1+1+rfid_len,
+							addr);
+					}
+					
+					if(sh->send_data(buf, recv_len+1)) break;//重连
 				}
-				//if(unlock) send;
 			}
-			printf("[%d] read_thread exit\n", cli_index);
+			printf("[%d] read_thread exit\n", sh->cli_index);
 		}
 		
 		static void write_thread(void *arg)
 		{
 			socket_help * sh = (socket_help *)arg;
+			#if 0
 			char report_device_info[256] = "report_device_info";
 			char heartbeat_info[256] = "heartbeat_info";
 			uint16_t report_len = strlen(report_device_info);
 			uint16_t heartbeat_len = strlen(heartbeat_info);
+			#endif
+			
+			uint8_t send_buf[256] = {0};
+			uint8_t *p = NULL;
+			uint16_t send_len = 0;
+
+			uint8_t rc522_index_start = '0';
+			uint8_t rc522_state_ok = '1';
+			uint8_t rc522_state_err = '0';
+			printf("[%d] terminal_id[%s]\n", sh->cli_index, sh->terminal_id.c_str());
 			while(1)
 			{
-				if(sh->send_data(report_device_info, report_len)) break;//重连
+				int random_addr = time(NULL)%(sh->rfid_id.size());
+				printf("[%d] rfid_id[index %d][%s]\n", sh->cli_index, random_addr, sh->rfid_id[random_addr].c_str());
+				#if 0
+				01 02 00 1D 00 00 00 0A 47 52 
+				7A 70 44 50 57 70 4E 6B 00 08 
+				68 44 51 35 6A 74 6A 30 00 
+				#endif
+				p = send_buf;
+				*p++ = 0x01;
+				*p++ = 0x02;
+				*(p += 2)++ = (uint8_t)(sh->send_msg_id >> 8);
+				*p++ = (uint8_t)sh->send_msg_id;
+				sh->send_msg_id++;
+				*p++ = 0x00;
+				*p++ = sh->terminal_id.length();
+				memcpy(p, sh->terminal_id.c_str(), sh->terminal_id.length());
+				p += sh->terminal_id.length();
+				*p++ = 0x00;
+				*p++ = sh->rfid_id[random_addr].length();
+				memcpy(p, sh->rfid_id[random_addr].c_str(), sh->rfid_id[random_addr].length());
+				p += sh->rfid_id[random_addr].length();
+				*p++ = random_addr;
+				
+				send_len = p-send_buf;
+				send_buf[3] = send_len;
+				if(sh->send_data(send_buf, send_len)) break;//重连
+				printf("[%d] write_thread report device info\n", sh->cli_index);
 				sleep(3);
-				if(sh->send_data(heartbeat_info, heartbeat_len)) break;//重连
+				
+				
+				#if 0
+				01 03 00 1D 00 01 00 0A 47 52 
+				7A 70 44 50 57 70 4E 6B 05 30 
+				31 31 30 32 31 33 30 34 31
+				#endif
+				p = send_buf;
+				*p++ = 0x01;
+				*p++ = 0x03;
+				*(p += 2)++ = (uint8_t)(sh->send_msg_id >> 8);
+				*p++ = (uint8_t)sh->send_msg_id;
+				sh->send_msg_id++;
+				*p++ = 0x00;
+				*p++ = sh->terminal_id.length();
+				memcpy(p, sh->terminal_id.c_str(), sh->terminal_id.length());
+				p += sh->terminal_id.length();
+				
+				*p++ = sh->rfid_id.size();
+				for(uint16_t i=0;i<sh->rfid_id.size();i++)
+				{
+					*p++ = i+ rc522_index_start;
+					if(i%2==0) *p++ = rc522_state_ok;
+					else *p++ = rc522_state_err;
+				}
+				
+				send_len = p-send_buf;
+				send_buf[3] = send_len;
+				if(sh->send_data(send_buf, send_len)) break;//重连
+				printf("[%d] write_thread heartbeat\n", sh->cli_index);
 				sleep(3);
 			}
 			printf("[%d] write_thread exit\n", sh->cli_index);

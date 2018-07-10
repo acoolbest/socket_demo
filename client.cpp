@@ -4,11 +4,19 @@
 
 static socket_help* gp_socket_help[CLIENT_COUNT]={NULL};
 
+vector<string> get_ip(string domain)
+{
+	domain_to_ip dti(domain);
+	vector<string> vec = dti.get_ip();
+	return vec;
+}
+//208l8w1838.51mypc.cn
+//103.46.128.41:57093 48438	192.168.0.67:8088
 int main()
 {
 	for(uint16_t i=0;i<CLIENT_COUNT;i++)
 	{
-		gp_socket_help[i] = new socket_help("103.46.128.41", 57093, i);//103.46.128.41:57093	192.168.0.67:8088
+		gp_socket_help[i] = new socket_help(get_ip("208l8w1838.51mypc.cn"), 48438, i);
 		if(!gp_socket_help[i]->init_socket())
 			printf("[%d] ok\n",i);
 		else

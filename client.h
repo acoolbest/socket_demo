@@ -21,10 +21,10 @@ struct DNS_HDR
 {  
   uint16_t id;
   uint16_t tag;
-  uint16_t numq;
-  uint16_t numa;
-  uint16_t numa1;
-  uint16_t numa2;
+  uint16_t q_count;
+  uint16_t ans_count;
+  uint16_t auth_count;
+  uint16_t add_count;
 };
 struct DNS_QER
 {
@@ -39,10 +39,10 @@ class domain_to_ip{
 		servfd = -1;
 		memset(buf,0,sizeof(buf));
 		dnshdr = (DNS_HDR *)buf;
-		dnshdr->id = 1;
+		dnshdr->id = htons(0x2000);
 		dnshdr->tag = htons(0x0100);
-		dnshdr->numq = htons(1);
-		dnshdr->numa = 0;
+		dnshdr->q_count = htons(1);
+		dnshdr->ans_count = 0;
 		strcpy(buf + sizeof(DNS_HDR) + 1, str_domain.c_str());
 		char * p = buf + sizeof(DNS_HDR) + 1; 
 		int i = 0;
@@ -65,57 +65,83 @@ class domain_to_ip{
 		dnsqer->type = htons(1);
 	}
 	~domain_to_ip(){
-		if(servfd != -1)
+		if(servfd != -1){
 			close(servfd);
+			servfd = -1;
+		}
+		printf("close dns socket\n");
 	}
-	string get_ip(){
-		
+	vector<string> get_ip(){
+		vector<string> vec;// {"192.168.1.103"};
 		struct sockaddr_in servaddr;
 		bzero(&servaddr, sizeof(servaddr));
 		servaddr.sin_family = AF_INET;
 		inet_aton(dns_server.c_str(), &servaddr.sin_addr);
 		servaddr.sin_port = htons(dns_port);
 
-		if ((servfd  =  socket(AF_INET, SOCK_DGRAM, 0 ))  <   0 )
+		for(int i=0;i<3;i++)
 		{
-			 printf( "dns create socket error!\n " );
-			 return "";
+			if(servfd != -1){
+				close(servfd);
+				servfd = -1;
+				sleep(3);
+			}	
+			if ((servfd  =  socket(AF_INET, SOCK_DGRAM, 0 ))  <   0 )
+			{
+				 printf( "dns create socket error!\n " );
+				 continue;
+			}
+			
+			int len = sendto(servfd, buf, sizeof(DNS_HDR) + sizeof(DNS_QER) + str_domain.length() + 2, 0, (struct sockaddr *)&servaddr, sizeof(servaddr));
+			if(len < 0)
+			{
+				printf("dns send error\n");
+				continue;
+			}
+			socklen_t addrlen = sizeof(struct sockaddr_in);
+			len = recvfrom(servfd, buf, 1024, 0, (struct sockaddr *)&servaddr, &addrlen);
+			if (len < 0)
+			{
+				  printf("dns recv error\n");
+				  continue;
+			}
+			if (dnshdr->ans_count == 0)
+			{
+				  printf("dns ack error\n");
+				  continue;
+			}
+			else
+			{
+				break;
+			}
 		}
-		
-		int len = sendto(servfd, buf, sizeof(DNS_HDR) + sizeof(DNS_QER) + str_domain.length() + 2, 0, (struct sockaddr *)&servaddr, sizeof(servaddr));
-		if(len < 0)
-		{
-			printf("dns send error\n");
-			return "";
-		}
-		socklen_t addrlen = sizeof(struct sockaddr_in);
-		len = recvfrom(servfd, buf, BUF_SIZE, 0, (struct sockaddr *)&servaddr, &addrlen);
-		if (len < 0)
-		{
-			  printf("dns recv error\n");
-			  return "";
-		}
-		if (dnshdr->numa == 0)
+		if (dnshdr->ans_count == 0)
 		{
 			  printf("dns ack error\n");
-			  return "";
+			  return vec;
 		}
-		p = buf + len -4;
-		
-		string s = std::to_string(*p) + "." + std::to_string(*(p + 1)) + "." + std::to_string(*(p + 2)) + "." + std::to_string(*(p + 3));
-		printf("%s ==> %u.%u.%u.%u\n", argv[1], (unsigned char)*p, (unsigned char)*(p + 1), (unsigned char)*(p + 2), (unsigned char)*(p + 3));
-		printf("%s ==> %s\n", str_domain.c_str(), s.c_str());
-		return s;
+		uint8_t *p = (uint8_t *)buf + sizeof(DNS_HDR) + sizeof(DNS_QER) + str_domain.length() + 2;
+		printf("Ans Count = %d\n", ntohs(dnshdr->ans_count));
+		for (int i = 0; i < ntohs(dnshdr->ans_count); i++)
+		{
+			p = p + 12;
+			string ip = std::to_string(*p) + "." + std::to_string(*(p + 1)) + "." + std::to_string(*(p + 2)) + "." + std::to_string(*(p + 3));
+			vec.push_back(ip);
+			printf("%s ==> %u.%u.%u.%u\n", str_domain.c_str(), (unsigned char)*p, (unsigned char)*(p + 1), (unsigned char)*(p + 2), (unsigned char)*(p + 3));
+			p = p + 4;
+		}
+		return vec;
 	}
 	private:
 		char buf[1024];
 		DNS_HDR  *dnshdr;
-		DNS_QER  *dnsqer
+		DNS_QER  *dnsqer;
 		int servfd;
-		const string dns_server = "114.114.114.114";
+		//const string dns_server = "101.198.198.198";
+		const string dns_server = "8.8.8.8";
 		const uint16_t dns_port = 53;
 		string str_domain;
-}
+};
 
 class random_string{
     public:
@@ -143,10 +169,11 @@ class random_string{
 
 class socket_help{
 	public:
-	socket_help(string server_ip, uint16_t server_port, uint16_t client_index)
+	socket_help(vector<string> server_ip, uint16_t server_port, uint16_t client_index)
 	{
 		sockfd = -1;
-		ip = server_ip;
+		srv_ip = "";
+		vec_ip = server_ip;
 		port = server_port;
 		cli_index = client_index;
 		memset(&servaddr,0,sizeof(servaddr));
@@ -190,7 +217,7 @@ class socket_help{
 		}
 		else
 		{
-			printf("[%d] send data: ", sh->cli_index);
+			printf("[%d] send data: ", cli_index);
 			for(uint16_t i=0;i<len;i++)
 			{
 				printf("%02x ", data[i]);
@@ -400,28 +427,37 @@ class socket_help{
 		signal(SIGPIPE,SIG_IGN);
 		servaddr.sin_family = AF_INET;
 		servaddr.sin_port = htons(port);
-		
-		if(inet_pton(AF_INET, ip.c_str(), &servaddr.sin_addr) <= 0)
+		for(auto ip:vec_ip){
+			if(inet_pton(AF_INET, ip.c_str(), &servaddr.sin_addr) <= 0)
+			{
+				printf("[%d] inet_pton error\n", cli_index);
+				continue;
+			}
+			
+			if((sockfd = socket(AF_INET, SOCK_STREAM, 0)) < 0)
+			{
+				printf("[%d] create socket error\n", cli_index);
+				continue;
+			}
+			struct timeval timeout = {3,0};
+			setsockopt(sockfd, SOL_SOCKET, SO_SNDTIMEO, (char *)&timeout, sizeof(struct timeval));
+			setsockopt(sockfd, SOL_SOCKET, SO_RCVTIMEO, (char *)&timeout, sizeof(struct timeval));
+			
+			if(connect(sockfd, (struct sockaddr*)&servaddr, sizeof(servaddr)) < 0)
+			{
+				printf("[%d] connect error: %s(errno: %d)\n", cli_index, strerror(errno), errno);
+				continue;
+			}
+			else
+			{
+				srv_ip = ip;
+				printf("get server ip[%s]\n", srv_ip.c_str());
+			}
+		}
+		if(!srv_ip.length())
 		{
-			printf("[%d] inet_pton error\n", cli_index);
 			return 1;
 		}
-		
-		if((sockfd = socket(AF_INET, SOCK_STREAM, 0)) < 0)
-		{
-			printf("[%d] create socket error\n", cli_index);
-			return 2;
-		}
-		struct timeval timeout = {3,0};
-		setsockopt(sockfd, SOL_SOCKET, SO_SNDTIMEO, (char *)&timeout, sizeof(struct timeval));
-		setsockopt(sockfd, SOL_SOCKET, SO_RCVTIMEO, (char *)&timeout, sizeof(struct timeval));
-		
-		if(connect(sockfd, (struct sockaddr*)&servaddr, sizeof(servaddr)) < 0)
-		{
-			printf("[%d] connect error: %s(errno: %d)\n", cli_index, strerror(errno), errno);
-			return 3;
-		}
-		
 		std::thread (read_thread,this).detach();
 		std::thread (write_thread,this).detach();
 
@@ -429,7 +465,8 @@ class socket_help{
 	}
 	private:
 	int sockfd;
-	string ip;
+	string srv_ip;
+	vector<string> vec_ip;
 	uint16_t port;
 	uint16_t cli_index;
 	struct sockaddr_in servaddr;

@@ -8,7 +8,7 @@ int main()
 {
 	for(uint16_t i=0;i<CLIENT_COUNT;i++)
 	{
-		gp_socket_help[i] = new socket_help("103.46.128.41", 8080, i);//103.46.128.41	192.168.0.67
+		gp_socket_help[i] = new socket_help("103.46.128.41", 57093, i);//103.46.128.41:57093	192.168.0.67:8088
 		if(!gp_socket_help[i]->init_socket())
 			printf("[%d] ok\n",i);
 		else

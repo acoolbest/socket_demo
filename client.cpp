@@ -16,7 +16,7 @@ int main()
 {
 	for(uint16_t i=0;i<CLIENT_COUNT;i++)
 	{
-		gp_socket_help[i] = new socket_help(get_ip("208l8w1838.51mypc.cn"), 48438, i);
+		gp_socket_help[i] = new socket_help(get_ip("208l8w1838.51mypc.cn"), 57093, i);
 		if(!gp_socket_help[i]->init_socket())
 			printf("[%d] ok\n",i);
 		else

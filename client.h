@@ -234,6 +234,7 @@ class socket_help{
 		int recv_len;
 		
 		uint16_t function_code = 0;
+		uint16_t data_len = 0;
 		uint16_t msg_id = 0;
 		uint16_t terminal_len = 0;
 		uint8_t terminal_id[32] = {0};
@@ -270,11 +271,34 @@ class socket_help{
 				71 7A 41 6E 79 64 51 68 00 08 
 				66 63 31 4E 75 56 4C 4B 00 01 
 				#endif
+				uint16_t * p16 = (uint16_t *)buf;
+				uint8_t *p = NULL;
+				function_code = htons(*p16++);
+				if(function_code != 0x0101) continue;
+				data_len = htons(*p16++);
+				msg_id = htons(*p16++);
+				
+				terminal_len = htons(*p16++);
+				p=(uint8_t *)p16;
+				memcpy(terminal_id, p, terminal_len);
+				terminal_id[terminal_len] = '\0';
+				p+=terminal_len;
+				p16=(uint16_t *)p;
+				
+				rfid_len = htons(*p16++);
+				p=(uint8_t *)p16;
+				memcpy(rfid_id, p, rfid_len);
+				rfid_id[rfid_len] = '\0';
+				p+=rfid_len;
+				addr = *p++;
+				
+				printf("0x%04x, 0x%04x, 0x%04x, 0x%04x, %s, 0x%04x, %s, 0x%02x\n", function_code, data_len, msg_id, terminal_len, terminal_id, rfid_len, rfid_id, addr);
+				
 				function_code = ((uint16_t)buf[0]) << 8 | buf[1];
 				if(function_code != 0x0101) continue;
 				msg_id = ((uint16_t)buf[4]) << 8 | buf[5];
 				terminal_len = ((uint16_t)buf[6]) << 8 | buf[7];
-				terminal_id[32] = {0};
+				//terminal_id[32] = {0};
 				memcpy(terminal_id, &buf[8], terminal_len);
 				terminal_id[terminal_len] = '\0';
 				rfid_len = ((uint16_t)buf[8+terminal_len]) << 8 | buf[8+terminal_len+1];
@@ -338,6 +362,7 @@ class socket_help{
 		
 		uint8_t send_buf[256] = {0};
 		uint8_t *p = NULL;
+		uint16_t *p16 = NULL;
 		uint16_t send_len = 0;
 
 		uint8_t rc522_index_start = '0';
@@ -360,6 +385,25 @@ class socket_help{
 				7A 70 44 50 57 70 4E 6B 00 08 
 				68 44 51 35 6A 74 6A 30 00 
 				#endif
+				p16 = (uint16_t *)send_buf;
+				*p16++ = htons(0x0102);
+				*(++p16)++ = sh->send_msg_id;
+				sh->send_msg_id++;
+				*p16++ = htons(sh->terminal_id.length());
+				p=(uint8_t *)p16;
+				memcpy(p, sh->terminal_id.c_str(), sh->terminal_id.length());
+				p += sh->terminal_id.length();
+				p16=(uint16_t *)p;
+				*p16++ = htons(sh->rfid_id[random_addr].length());
+				p=(uint8_t *)p16;
+				memcpy(p, sh->rfid_id[random_addr].c_str(), sh->rfid_id[random_addr].length());
+				p += sh->rfid_id[random_addr].length();
+				*p++ = random_addr;
+				send_len = p-send_buf;
+				send_buf[3] = send_len;
+				
+				if(sh->send_data(send_buf, send_len)) break;//重连
+				#if 0
 				p = send_buf;
 				*p++ = 0x01;
 				*p++ = 0x02;
@@ -378,7 +422,9 @@ class socket_help{
 				
 				send_len = p-send_buf;
 				send_buf[3] = send_len;
+
 				if(sh->send_data(send_buf, send_len)) break;//重连
+				#endif
 				printf("[%d] write_thread report device info\n", sh->cli_index);
 				//sleep(3);
 			}

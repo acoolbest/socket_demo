@@ -107,6 +107,11 @@ private:
 
 int main(int argc, char **argv)
 {
+	if(argc < 2)
+	{
+		printf("usage: ./tcpdns www.baidu.com\n");
+		return -1;
+	}
     unsigned char buff[1024];
     unsigned char *buf = buff + 2;
     unsigned char *p;

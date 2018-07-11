@@ -344,7 +344,7 @@ class socket_help{
 						addr);
 				}
 				
-				if(sh->send_data(buf, recv_len+1)) break;//重连
+				if(sh->send_data(buf, recv_len+1+4)) break;//重连
 			}
 		}
 		printf("[%d] read_thread exit\n", sh->cli_index);
@@ -400,7 +400,7 @@ class socket_help{
 				p += sh->rfid_id[random_addr].length();
 				*p++ = random_addr;
 				send_len = p-send_buf;
-				send_buf[3] = send_len;
+				send_buf[3] = send_len-4;
 				
 				if(sh->send_data(send_buf, send_len)) break;//重连
 				#if 0
@@ -421,7 +421,7 @@ class socket_help{
 				*p++ = random_addr;
 				
 				send_len = p-send_buf;
-				send_buf[3] = send_len;
+				send_buf[3] = send_len-4;
 
 				if(sh->send_data(send_buf, send_len)) break;//重连
 				#endif

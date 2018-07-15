@@ -172,7 +172,7 @@ class socket_help{
 	socket_help(vector<string> server_ip, uint16_t server_port, uint16_t client_index)
 	{
 		sockfd = -1;
-		srv_ip = "";
+		srv_ip = "";//"103.46.128.41";//"39.106.26.66";
 		vec_ip = server_ip;
 		port = server_port;
 		cli_index = client_index;
@@ -455,7 +455,7 @@ class socket_help{
 				}
 				
 				send_len = p-send_buf;
-				send_buf[3] = send_len;
+				send_buf[3] = send_len-4;
 				if(sh->send_data(send_buf, send_len)) break;//重连
 				printf("[%d] write_thread heartbeat\n", sh->cli_index);
 				//sleep(3);
@@ -473,6 +473,7 @@ class socket_help{
 		signal(SIGPIPE,SIG_IGN);
 		servaddr.sin_family = AF_INET;
 		servaddr.sin_port = htons(port);
+		#if 1
 		for(auto ip:vec_ip){
 			if(inet_pton(AF_INET, ip.c_str(), &servaddr.sin_addr) <= 0)
 			{
@@ -500,6 +501,7 @@ class socket_help{
 				printf("get server ip[%s]\n", srv_ip.c_str());
 			}
 		}
+		#endif
 		if(!srv_ip.length())
 		{
 			return 1;

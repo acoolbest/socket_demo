@@ -1,8 +1,6 @@
 #include "client.h"
 //g++ client.cpp -lpthread -g -Wall -std=c++11
-#define CLIENT_COUNT 1
-//39.106.26.66:9503
-//#define ZHZQ
+
 static socket_help* gp_socket_help[CLIENT_COUNT]={NULL};
 
 vector<string> get_ip(string domain)
@@ -11,6 +9,7 @@ vector<string> get_ip(string domain)
 	vector<string> vec = dti.get_ip();
 	return vec;
 }
+//39.106.26.66:9503
 //208l8w1838.51mypc.cn
 //103.46.128.41:57093 48438	192.168.0.67:8088
 int main()

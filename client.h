@@ -17,6 +17,12 @@
 
 using namespace std;
 
+//#define ZHZQ
+#define TERMINAL_LEN 15
+#define RFID_SIZE 10
+#define RFID_LEN 10
+#define CLIENT_COUNT 1
+
 struct DNS_HDR
 {  
   uint16_t id;
@@ -177,9 +183,9 @@ class socket_help{
 		port = server_port;
 		cli_index = client_index;
 		memset(&servaddr,0,sizeof(servaddr));
-		terminal_id = random_string::gene(10);
-		for(int i=0;i<5;i++)
-			rfid_id.push_back(random_string::gene(8));
+		terminal_id = random_string::gene(TERMINAL_LEN);
+		for(int i=0;i<RFID_SIZE;i++)
+			rfid_id.push_back(random_string::gene(RFID_LEN));
 		send_msg_id = 0;
 		recv_msg_id = 0;
 	}

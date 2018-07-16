@@ -18,9 +18,9 @@
 using namespace std;
 
 //#define ZHZQ
-#define TERMINAL_LEN 15
-#define RFID_SIZE 10
-#define RFID_LEN 10
+#define TERMINAL_LEN 8
+#define RFID_SIZE 8
+#define RFID_LEN 8
 #define CLIENT_COUNT 1
 
 struct DNS_HDR
@@ -377,6 +377,7 @@ class socket_help{
 		printf("[%d] terminal_id[%s]\n", sh->cli_index, sh->terminal_id.c_str());
 		
 		int input_num;
+		static uint8_t u8_i=0;
 		while(1)
 		{
 			std::cout << "pls input a num, 2 is report device info, 3 is heartbeat\n";
@@ -393,7 +394,7 @@ class socket_help{
 				#endif
 				p16 = (uint16_t *)send_buf;
 				*p16++ = htons(0x0102);
-				*(++p16)++ = sh->send_msg_id;
+				*(++p16)++ = htons(sh->send_msg_id);
 				sh->send_msg_id++;
 				*p16++ = htons(sh->terminal_id.length());
 				p=(uint8_t *)p16;
@@ -453,11 +454,16 @@ class socket_help{
 				p += sh->terminal_id.length();
 				
 				*p++ = sh->rfid_id.size();
+				
+				u8_i^=1;
 				for(uint16_t i=0;i<sh->rfid_id.size();i++)
 				{
 					*p++ = i+ rc522_index_start;
-					if(i%2==0) *p++ = rc522_state_ok;
-					else *p++ = rc522_state_err;
+					if(u8_i) *p++ = rc522_state_ok;
+					else{
+						if(i%2==0) *p++ = rc522_state_ok;
+						else *p++ = rc522_state_err;
+					}
 				}
 				
 				send_len = p-send_buf;

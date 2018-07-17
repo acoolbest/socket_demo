@@ -22,7 +22,7 @@ int main()
 	for(uint16_t i=0;i<CLIENT_COUNT;i++)
 	{
 		#ifdef ZHZQ
-		gp_socket_help[i] = new socket_help(vec, 48438, i);
+		gp_socket_help[i] = new socket_help(vec, 57093, i);
 		//gp_socket_help[i] = new socket_help(get_ip("208l8w1838.51mypc.cn"), 48438, i);
 		#else
 		gp_socket_help[i] = new socket_help(vec, 9503, i);

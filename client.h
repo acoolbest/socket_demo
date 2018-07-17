@@ -313,12 +313,14 @@ class socket_help{
 				rfid_id[rfid_len] = '\0';
 				addr = buf[8+terminal_len+1+1+rfid_len];
 				
+				uint8_t result_code = 0;
 				if(terminal_len == sh->terminal_id.length()
 					&& !memcmp(terminal_id, sh->terminal_id.c_str(), terminal_len)
 					&& addr < sh->rfid_id.size()
 					&& rfid_len == sh->rfid_id[addr].length()
 					&& !memcmp(rfid_id, sh->rfid_id[addr].c_str(), rfid_len))
 				{
+					result_code = 0x00;
 					buf[1] = 0x01;
 					buf[recv_len] = 0x00;
 					buf[3] = recv_len+1;
@@ -333,6 +335,7 @@ class socket_help{
 				}
 				else 
 				{
+					result_code = 0x01;
 					buf[1] = 0x01;
 					buf[recv_len] = 0x01;
 					buf[3] = recv_len+1;
@@ -349,8 +352,26 @@ class socket_help{
 						8+terminal_len+1+1+rfid_len,
 						addr);
 				}
+				uint8_t send_buf[256] = {0};
+				p16 = (uint16_t *)send_buf;
+				*p16++ = htons(0x0102);
+				*(++p16)++ = htons(msg_id);
+
+				*p16++ = htons(sh->terminal_id.length());
+				p=(uint8_t *)p16;
+				memcpy(p, sh->terminal_id.c_str(), sh->terminal_id.length());
+				p += sh->terminal_id.length();
+				p16=(uint16_t *)p;
+				*p16++ = htons(sh->rfid_id[addr].length());
+				p=(uint8_t *)p16;
+				memcpy(p, sh->rfid_id[addr].c_str(), sh->rfid_id[addr].length());
+				p += sh->rfid_id[addr].length();
+				*p++ = addr;
+				*p++ = result_code;
+				uint16_t send_len = p-send_buf;
+				send_buf[3] = send_len-4;
 				
-				if(sh->send_data(buf, recv_len+1+4)) break;//重连
+				if(sh->send_data(send_buf, send_len)) break;//重连
 			}
 		}
 		printf("[%d] read_thread exit\n", sh->cli_index);
@@ -376,14 +397,17 @@ class socket_help{
 		uint8_t rc522_state_err = '0';
 		printf("[%d] terminal_id[%s]\n", sh->cli_index, sh->terminal_id.c_str());
 		
-		int input_num;
+		//int input_num;
 		static uint8_t u8_i=0;
+		static uint8_t u8_j=0;
 		while(1)
 		{
-			std::cout << "pls input a num, 2 is report device info, 3 is heartbeat\n";
-			std::cin >> input_num;
+			//std::cout << "pls input a num, 2 is report device info, 3 is heartbeat\n";
+			//std::cin >> input_num;
 			
-			if(input_num == 2)
+			//if(input_num == 2)
+			u8_j^=1;
+			if(u8_j==0)
 			{
 				int random_addr = time(NULL)%(sh->rfid_id.size());
 				printf("[%d] rfid_id[index %d][%s]\n", sh->cli_index, random_addr, sh->rfid_id[random_addr].c_str());
@@ -433,9 +457,10 @@ class socket_help{
 				if(sh->send_data(send_buf, send_len)) break;//重连
 				#endif
 				printf("[%d] write_thread report device info\n", sh->cli_index);
-				//sleep(3);
+				
 			}
-			else if(input_num == 3)
+			//else if(input_num == 3)
+			else
 			{
 				#if 0
 				01 03 00 1D 00 01 00 0A 47 52 
@@ -470,12 +495,12 @@ class socket_help{
 				send_buf[3] = send_len-4;
 				if(sh->send_data(send_buf, send_len)) break;//重连
 				printf("[%d] write_thread heartbeat\n", sh->cli_index);
-				//sleep(3);
 			}
-			else
-			{
-				printf("[%d] write_thread error input num %d\n", sh->cli_index, input_num);
-			}
+			sleep(10);
+			//else
+			//{
+			//	printf("[%d] write_thread error input num %d\n", sh->cli_index, input_num);
+			//}
 		}
 		printf("[%d] write_thread exit\n", sh->cli_index);
 	}

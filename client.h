@@ -14,6 +14,12 @@
 #include <signal.h>
 #include <random>
 #include <vector>
+#include <sys/syscall.h>
+#include <sys/stat.h>
+#include <sys/types.h>
+#include <stdarg.h>
+
+
 
 using namespace std;
 
@@ -21,7 +27,10 @@ using namespace std;
 #define TERMINAL_LEN 8
 #define RFID_SIZE 8
 #define RFID_LEN 8
-#define CLIENT_COUNT 1
+#define CLIENT_COUNT 500
+
+#define MAX_PATH 256
+#define MAXLEN_LOGRECORD 1024
 
 struct DNS_HDR
 {  
@@ -37,6 +46,156 @@ struct DNS_QER
    uint16_t type;
    uint16_t classes;
 };
+
+void get_cur_time(char* cur_time, bool btype)
+{
+	time_t lTime;
+	struct tm *ptmTime;
+
+	time(&lTime);
+	ptmTime = localtime(&lTime);
+	if (btype)
+	{
+		strftime(cur_time, 32, "%Y/%m/%d %H:%M:%S", ptmTime);
+	}
+	else
+	{
+		strftime(cur_time, 32, "%Y%m%d%H%M%S", ptmTime);
+	}
+
+}
+string get_cur_work_folder()
+{
+	char sz_file_path[MAX_PATH] = {0};
+	if(getcwd(sz_file_path, MAX_PATH))
+		return string(sz_file_path);
+	else
+		return "";
+}
+
+bool check_folder(const char* p_path_name)
+{
+	char  dir_name[MAX_PATH] = {0};
+	strcpy(dir_name, p_path_name);
+	int i = 0, len = strlen(dir_name);
+
+	if (dir_name[len - 1] != '/')
+	{
+		strcat(dir_name, "/");
+	}
+
+	len = strlen(dir_name);
+
+	for (i = 1; i < len; i++)
+	{
+		if (dir_name[i] == '/')
+		{
+			dir_name[i] = 0;
+			if (access(dir_name, F_OK) != 0)
+			{
+				if (mkdir(dir_name, 0777) == -1)
+				{
+					return false;
+				}
+			}
+			dir_name[i] = '/';
+		}
+	}
+
+	return (access(p_path_name, F_OK) == 0) ? true : false;
+}
+
+bool append_to_file(const char* file_name, const char* content, size_t file_length)
+{
+	FILE* fp = NULL;
+
+	try
+	{
+		fp = fopen(file_name, "a+b");
+		if (fp == NULL)
+			return false;
+		
+		fwrite(content, 1, file_length, fp);
+		fclose(fp);
+	}
+	catch (...)
+	{
+		fclose(fp);
+		return false;
+	}
+
+	return true;
+}
+
+void get_cur_date(char* cur_date)
+{
+	time_t lTime;
+	struct tm *ptmTime;
+
+	time(&lTime);
+
+	ptmTime = localtime(&lTime);
+
+	strftime(cur_date, 16, "%Y%m%d", ptmTime);
+}
+
+void write_log(const char *fm, ...)
+{
+	int iSize = 0;
+
+	char buff[MAXLEN_LOGRECORD] = { 0 };
+
+	int i = 0;
+	char cur_time[32] = { 0 };
+	get_cur_time(cur_time, true);
+	i = sprintf(buff, "%s gettid:%ld\t", cur_time, syscall(SYS_gettid));
+	int m_maxlen = MAXLEN_LOGRECORD - (i + 3);
+	va_list args;
+	va_start(args, fm);
+	iSize = vsprintf(buff + i, fm, args);
+	va_end(args);
+
+	if (iSize > m_maxlen || iSize < 0)
+	{
+		memset(buff, 0, MAXLEN_LOGRECORD);
+		iSize = sprintf(buff, "%s\t", cur_time);
+		iSize += sprintf(buff + iSize, "-- * --\n");
+	}
+	else
+	{
+		iSize += i;
+		if (iSize < MAXLEN_LOGRECORD - 2)
+		{
+			buff[iSize] = 13;
+			buff[iSize+1] = 10;
+			iSize+=2;
+		}
+	}
+
+	char curDate[20] = { 0 };
+	char fileName[300] = { 0 };
+	get_cur_date(curDate);
+	int  j = 0;
+	j = sprintf(fileName, "%s/%s", get_cur_work_folder().c_str(), "logs");
+	check_folder(fileName);
+
+	j += sprintf(fileName + j, "/%s_%s%s", "tcp_client", curDate, ".log");
+
+	append_to_file(fileName, buff, iSize);
+	//cout << fileName << endl;
+	return;
+}
+
+void print_com_data_to_log(const char * str, uint8_t * data, uint16_t len)
+{
+	char buffer[2048] = { 0 };
+	for (int i = 0; i < len; i++)
+	{
+		sprintf(buffer + i * 3, " %02X", data[i]);
+	}
+	write_log("%s%s", str, buffer);
+}
+
 
 class domain_to_ip{
 	public:
@@ -76,6 +235,7 @@ class domain_to_ip{
 			servfd = -1;
 		}
 		printf("close dns socket\n");
+		write_log("close dns socket\n");
 	}
 	vector<string> get_ip(){
 		vector<string> vec;// {"192.168.1.103"};
@@ -94,7 +254,8 @@ class domain_to_ip{
 			}	
 			if ((servfd  =  socket(AF_INET, SOCK_DGRAM, 0 ))  <   0 )
 			{
-				 printf( "dns create socket error!\n " );
+				 printf("dns create socket error!\n ");
+				 write_log("dns create socket error!\n ");
 				 continue;
 			}
 			
@@ -102,6 +263,7 @@ class domain_to_ip{
 			if(len < 0)
 			{
 				printf("dns send error\n");
+				write_log("dns send error\n");
 				continue;
 			}
 			socklen_t addrlen = sizeof(struct sockaddr_in);
@@ -109,11 +271,13 @@ class domain_to_ip{
 			if (len < 0)
 			{
 				  printf("dns recv error\n");
+				  write_log("dns recv error\n");
 				  continue;
 			}
 			if (dnshdr->ans_count == 0)
 			{
 				  printf("dns ack error\n");
+				  write_log("dns ack error\n");
 				  continue;
 			}
 			else
@@ -124,16 +288,19 @@ class domain_to_ip{
 		if (dnshdr->ans_count == 0)
 		{
 			  printf("dns ack error\n");
+			  write_log("dns ack error\n");
 			  return vec;
 		}
 		uint8_t *p = (uint8_t *)buf + sizeof(DNS_HDR) + sizeof(DNS_QER) + str_domain.length() + 2;
 		printf("Ans Count = %d\n", ntohs(dnshdr->ans_count));
+		write_log("Ans Count = %d\n", ntohs(dnshdr->ans_count));
 		for (int i = 0; i < ntohs(dnshdr->ans_count); i++)
 		{
 			p = p + 12;
 			string ip = std::to_string(*p) + "." + std::to_string(*(p + 1)) + "." + std::to_string(*(p + 2)) + "." + std::to_string(*(p + 3));
 			vec.push_back(ip);
 			printf("%s ==> %u.%u.%u.%u\n", str_domain.c_str(), (unsigned char)*p, (unsigned char)*(p + 1), (unsigned char)*(p + 2), (unsigned char)*(p + 3));
+			write_log("%s ==> %u.%u.%u.%u\n", str_domain.c_str(), (unsigned char)*p, (unsigned char)*(p + 1), (unsigned char)*(p + 2), (unsigned char)*(p + 3));
 			p = p + 4;
 		}
 		return vec;
@@ -202,33 +369,42 @@ class socket_help{
 	int send_data(uint8_t * data, uint16_t len)
 	{	
 		std::unique_lock<std::mutex> lok(send_mutex);
+		char str_print[1024] = "";
 		if(send(sockfd, data, len, 0) < 0)
 		{
 			if(errno==EINTR)
 			{
 				printf("[%d] send error : errno==EINTR strerror : %s, continue\n", cli_index, strerror(errno));
+				write_log("[%d] send error : errno==EINTR strerror : %s, continue\n", cli_index, strerror(errno));
 				return 0;
 			}
 			else if(errno==EAGAIN)
 			{
 				sleep(1);
 				printf("[%d] send error : errno==EAGAIN strerror : %s, continue\n", cli_index, strerror(errno));
+				write_log("[%d] send error : errno==EAGAIN strerror : %s, continue\n", cli_index, strerror(errno));
 				return 0;
 			}
 			else
 			{
-				printf("[%d] send error : errno : %d, strerror : %s \n", cli_index, errno, strerror(errno)); 
+				printf("[%d] send error : errno : %d, strerror : %s \n", cli_index, errno, strerror(errno));
+				write_log("[%d] send error : errno : %d, strerror : %s \n", cli_index, errno, strerror(errno));
 				return 1;
 			}
 		}
 		else
 		{
+			sprintf(str_print, "[%d] send data: ", cli_index);
+			print_com_data_to_log(str_print, data, len);
+			#if 0
 			printf("[%d] send data: ", cli_index);
 			for(uint16_t i=0;i<len;i++)
 			{
+
 				printf("%02x ", data[i]);
 			}
 			printf("\n");
+			#endif
 		}
 		return 0;
 	}
@@ -247,6 +423,8 @@ class socket_help{
 		uint16_t rfid_len = 0;
 		uint8_t rfid_id[32] = {0};
 		uint8_t addr = 0;
+		
+		char str_print[1024] = "";
 
 		while(1)
 		{
@@ -260,18 +438,22 @@ class socket_help{
 				else
 				{
 					printf("[%d] recv error, server crash\n", sh->cli_index);
+					write_log("[%d] recv error, server crash\n", sh->cli_index);
 					break;
 				}
 				
 			}
 			if(recv_len>0)
 			{
-				printf("[%d] recv data: ", sh->cli_index);
+				sprintf(str_print, "[%d] recv data: ", sh->cli_index);
+				print_com_data_to_log(str_print, buf, recv_len);
+				#if 0
 				for(int i=0;i<recv_len;i++)
 				{
-					printf("%02x ", buf[i]);
+					write_log("%02x ", buf[i]);
 				}
-				printf("\n");
+				write_log("\n");
+				#endif
 				#if 0
 				00 01 00 1E 00 00 00 0A 38 70 
 				71 7A 41 6E 79 64 51 68 00 08 
@@ -298,7 +480,7 @@ class socket_help{
 				p+=rfid_len;
 				addr = *p++;
 				
-				printf("0x%04x, 0x%04x, 0x%04x, 0x%04x, %s, 0x%04x, %s, 0x%02x\n", function_code, data_len, msg_id, terminal_len, terminal_id, rfid_len, rfid_id, addr);
+				write_log("[%d] 0x%04x, 0x%04x, 0x%04x, 0x%04x, %s, 0x%04x, %s, 0x%02x\n", sh->cli_index, function_code, data_len, msg_id, terminal_len, terminal_id, rfid_len, rfid_id, addr);
 				
 				function_code = ((uint16_t)buf[0]) << 8 | buf[1];
 				if(function_code != 0x0101) continue;
@@ -324,7 +506,8 @@ class socket_help{
 					buf[1] = 0x01;
 					buf[recv_len] = 0x00;
 					buf[3] = recv_len+1;
-					printf("[%d] read_thread msg_id[%04x], rfid_len[%04x], rfid_id[index %d][%s] addr[index %d][%02x], result_code[0x00]\n", 
+					
+					write_log("[%d] read_thread msg_id[%04x], rfid_len[%04x], rfid_id[index %d][%s] addr[index %d][%02x], result_code[0x00]\n", 
 						sh->cli_index,
 						msg_id,
 						rfid_len,
@@ -332,6 +515,7 @@ class socket_help{
 						rfid_id,
 						8+terminal_len+1+1+rfid_len,
 						addr);
+					
 				}
 				else 
 				{
@@ -339,8 +523,8 @@ class socket_help{
 					buf[1] = 0x01;
 					buf[recv_len] = 0x01;
 					buf[3] = recv_len+1;
-
-					printf("[%d] read_thread function_code[%04x],msg_id[%04x], terminal_len[%04x], terminal_id[%s], rfid_len[%04x], rfid_id[index %d][%s] addr[index %d][%02x], result_code[0x01]\n", 
+					
+					write_log("[%d] read_thread function_code[%04x],msg_id[%04x], terminal_len[%04x], terminal_id[%s], rfid_len[%04x], rfid_id[index %d][%s] addr[index %d][%02x], result_code[0x01]\n", 
 						sh->cli_index,
 						function_code,
 						msg_id,
@@ -351,6 +535,7 @@ class socket_help{
 						rfid_id,
 						8+terminal_len+1+1+rfid_len,
 						addr);
+					
 				}
 				uint8_t send_buf[256] = {0};
 				p16 = (uint16_t *)send_buf;
@@ -371,10 +556,11 @@ class socket_help{
 				uint16_t send_len = p-send_buf;
 				send_buf[3] = send_len-4;
 				
-				if(sh->send_data(send_buf, send_len)) break;//重连
+				if(sh->send_data(send_buf, send_len)) break;//reconnect
 			}
 		}
 		printf("[%d] read_thread exit\n", sh->cli_index);
+		write_log("[%d] read_thread exit\n", sh->cli_index);
 	}
 	
 	static void write_thread(void *arg)
@@ -395,8 +581,7 @@ class socket_help{
 		uint8_t rc522_index_start = '0';
 		uint8_t rc522_state_ok = '1';
 		uint8_t rc522_state_err = '0';
-		printf("[%d] terminal_id[%s]\n", sh->cli_index, sh->terminal_id.c_str());
-		
+		write_log("[%d] terminal_id[%s]\n", sh->cli_index, sh->terminal_id.c_str());
 		//int input_num;
 		static uint8_t u8_i=0;
 		static uint8_t u8_j=0;
@@ -410,7 +595,7 @@ class socket_help{
 			if(u8_j==0)
 			{
 				int random_addr = time(NULL)%(sh->rfid_id.size());
-				printf("[%d] rfid_id[index %d][%s]\n", sh->cli_index, random_addr, sh->rfid_id[random_addr].c_str());
+				write_log("[%d] rfid_id[index %d][%s]\n", sh->cli_index, random_addr, sh->rfid_id[random_addr].c_str());
 				#if 0
 				01 02 00 1D 00 00 00 0A 47 52 
 				7A 70 44 50 57 70 4E 6B 00 08 
@@ -433,7 +618,7 @@ class socket_help{
 				send_len = p-send_buf;
 				send_buf[3] = send_len-4;
 				
-				if(sh->send_data(send_buf, send_len)) break;//重连
+				if(sh->send_data(send_buf, send_len)) break;//reconnect
 				#if 0
 				p = send_buf;
 				*p++ = 0x01;
@@ -454,9 +639,9 @@ class socket_help{
 				send_len = p-send_buf;
 				send_buf[3] = send_len-4;
 
-				if(sh->send_data(send_buf, send_len)) break;//重连
+				if(sh->send_data(send_buf, send_len)) break;//reconnect
 				#endif
-				printf("[%d] write_thread report device info\n", sh->cli_index);
+				write_log("[%d] write_thread report device info\n", sh->cli_index);
 				
 			}
 			//else if(input_num == 3)
@@ -493,8 +678,8 @@ class socket_help{
 				
 				send_len = p-send_buf;
 				send_buf[3] = send_len-4;
-				if(sh->send_data(send_buf, send_len)) break;//重连
-				printf("[%d] write_thread heartbeat\n", sh->cli_index);
+				if(sh->send_data(send_buf, send_len)) break;//reconnect
+				write_log("[%d] write_thread heartbeat\n", sh->cli_index);
 			}
 			sleep(10);
 			//else
@@ -503,6 +688,7 @@ class socket_help{
 			//}
 		}
 		printf("[%d] write_thread exit\n", sh->cli_index);
+		write_log("[%d] write_thread exit\n", sh->cli_index);
 	}
 
 	int init_socket()
@@ -515,12 +701,14 @@ class socket_help{
 			if(inet_pton(AF_INET, ip.c_str(), &servaddr.sin_addr) <= 0)
 			{
 				printf("[%d] inet_pton error\n", cli_index);
+				write_log("[%d] inet_pton error\n", cli_index);
 				continue;
 			}
 			
 			if((sockfd = socket(AF_INET, SOCK_STREAM, 0)) < 0)
 			{
 				printf("[%d] create socket error\n", cli_index);
+				write_log("[%d] create socket error\n", cli_index);
 				continue;
 			}
 			struct timeval timeout = {3,0};
@@ -530,12 +718,14 @@ class socket_help{
 			if(connect(sockfd, (struct sockaddr*)&servaddr, sizeof(servaddr)) < 0)
 			{
 				printf("[%d] connect error: %s(errno: %d)\n", cli_index, strerror(errno), errno);
+				write_log("[%d] connect error: %s(errno: %d)\n", cli_index, strerror(errno), errno);
 				continue;
 			}
 			else
 			{
 				srv_ip = ip;
 				printf("get server ip[%s]\n", srv_ip.c_str());
+				write_log("get server ip[%s]\n", srv_ip.c_str());
 			}
 		}
 		#endif

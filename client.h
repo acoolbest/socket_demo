@@ -19,15 +19,16 @@
 #include <sys/types.h>
 #include <stdarg.h>
 
-
-
 using namespace std;
 
 //#define ZHZQ
+
+//#define RANDOM_DATA
+
 #define TERMINAL_LEN 8
 #define RFID_SIZE 8
 #define RFID_LEN 8
-#define CLIENT_COUNT 500
+#define CLIENT_COUNT 1000
 
 #define MAX_PATH 256
 #define MAXLEN_LOGRECORD 1024
@@ -254,7 +255,7 @@ class domain_to_ip{
 			}	
 			if ((servfd  =  socket(AF_INET, SOCK_DGRAM, 0 ))  <   0 )
 			{
-				 printf("dns create socket error!\n ");
+				 fprintf(stderr, "dns create socket error!\n ");
 				 write_log("dns create socket error!\n ");
 				 continue;
 			}
@@ -262,7 +263,7 @@ class domain_to_ip{
 			int len = sendto(servfd, buf, sizeof(DNS_HDR) + sizeof(DNS_QER) + str_domain.length() + 2, 0, (struct sockaddr *)&servaddr, sizeof(servaddr));
 			if(len < 0)
 			{
-				printf("dns send error\n");
+				fprintf(stderr, "dns send error\n");
 				write_log("dns send error\n");
 				continue;
 			}
@@ -270,13 +271,13 @@ class domain_to_ip{
 			len = recvfrom(servfd, buf, 1024, 0, (struct sockaddr *)&servaddr, &addrlen);
 			if (len < 0)
 			{
-				  printf("dns recv error\n");
+				  fprintf(stderr, "dns recv error\n");
 				  write_log("dns recv error\n");
 				  continue;
 			}
 			if (dnshdr->ans_count == 0)
 			{
-				  printf("dns ack error\n");
+				  fprintf(stderr, "dns ack error\n");
 				  write_log("dns ack error\n");
 				  continue;
 			}
@@ -287,7 +288,7 @@ class domain_to_ip{
 		}
 		if (dnshdr->ans_count == 0)
 		{
-			  printf("dns ack error\n");
+			  fprintf(stderr, "dns ack error\n");
 			  write_log("dns ack error\n");
 			  return vec;
 		}
@@ -345,14 +346,22 @@ class socket_help{
 	socket_help(vector<string> server_ip, uint16_t server_port, uint16_t client_index)
 	{
 		sockfd = -1;
-		srv_ip = "";//"103.46.128.41";//"39.106.26.66";
+		srv_ip = "";
 		vec_ip = server_ip;
 		port = server_port;
 		cli_index = client_index;
 		memset(&servaddr,0,sizeof(servaddr));
+		
+		#ifdef RANDOM_DATA
 		terminal_id = random_string::gene(TERMINAL_LEN);
 		for(int i=0;i<RFID_SIZE;i++)
 			rfid_id.push_back(random_string::gene(RFID_LEN));
+		#else
+		terminal_id = "terminal";
+		for(int i=0;i<RFID_SIZE;i++)
+			rfid_id.push_back("rfid_id"+std::to_string(i));
+		#endif
+		
 		send_msg_id = 0;
 		recv_msg_id = 0;
 	}
@@ -374,20 +383,20 @@ class socket_help{
 		{
 			if(errno==EINTR)
 			{
-				printf("[%d] send error : errno==EINTR strerror : %s, continue\n", cli_index, strerror(errno));
+				fprintf(stderr, "[%d] send error : errno==EINTR strerror : %s, continue\n", cli_index, strerror(errno));
 				write_log("[%d] send error : errno==EINTR strerror : %s, continue\n", cli_index, strerror(errno));
 				return 0;
 			}
 			else if(errno==EAGAIN)
 			{
 				sleep(1);
-				printf("[%d] send error : errno==EAGAIN strerror : %s, continue\n", cli_index, strerror(errno));
+				fprintf(stderr, "[%d] send error : errno==EAGAIN strerror : %s, continue\n", cli_index, strerror(errno));
 				write_log("[%d] send error : errno==EAGAIN strerror : %s, continue\n", cli_index, strerror(errno));
 				return 0;
 			}
 			else
 			{
-				printf("[%d] send error : errno : %d, strerror : %s \n", cli_index, errno, strerror(errno));
+				fprintf(stderr, "[%d] send error : errno : %d, strerror : %s \n", cli_index, errno, strerror(errno));
 				write_log("[%d] send error : errno : %d, strerror : %s \n", cli_index, errno, strerror(errno));
 				return 1;
 			}
@@ -409,9 +418,8 @@ class socket_help{
 		return 0;
 	}
 
-	static void read_thread(void *arg)
+	static void read_thread(socket_help * sh)
 	{
-		socket_help * sh = (socket_help *)arg;
 		uint8_t buf[256] = {0};
 		int recv_len;
 		
@@ -433,11 +441,11 @@ class socket_help{
 			{
 				if(errno==EAGAIN)
 				{
-					;//printf("[%d] recv timeout\n", sh->cli_index);
+					;//fprintf(stderr, "[%d] recv timeout\n", sh->cli_index);
 				}
 				else
 				{
-					printf("[%d] recv error, server crash\n", sh->cli_index);
+					fprintf(stderr, "[%d] recv error, server crash\n", sh->cli_index);
 					write_log("[%d] recv error, server crash\n", sh->cli_index);
 					break;
 				}
@@ -454,11 +462,7 @@ class socket_help{
 				}
 				write_log("\n");
 				#endif
-				#if 0
-				00 01 00 1E 00 00 00 0A 38 70 
-				71 7A 41 6E 79 64 51 68 00 08 
-				66 63 31 4E 75 56 4C 4B 00 01 
-				#endif
+
 				uint16_t * p16 = (uint16_t *)buf;
 				uint8_t *p = NULL;
 				function_code = htons(*p16++);
@@ -484,6 +488,7 @@ class socket_help{
 				
 				function_code = ((uint16_t)buf[0]) << 8 | buf[1];
 				if(function_code != 0x0101) continue;
+				
 				msg_id = ((uint16_t)buf[4]) << 8 | buf[5];
 				terminal_len = ((uint16_t)buf[6]) << 8 | buf[7];
 				//terminal_id[32] = {0};
@@ -539,7 +544,7 @@ class socket_help{
 				}
 				uint8_t send_buf[256] = {0};
 				p16 = (uint16_t *)send_buf;
-				*p16++ = htons(0x0102);
+				*p16++ = htons(0x0101);
 				*(++p16)++ = htons(msg_id);
 
 				*p16++ = htons(sh->terminal_id.length());
@@ -562,137 +567,129 @@ class socket_help{
 		printf("[%d] read_thread exit\n", sh->cli_index);
 		write_log("[%d] read_thread exit\n", sh->cli_index);
 	}
-	
-	static void write_thread(void *arg)
+
+	static void send_heartbeat(socket_help * sh, bool while_flag)
 	{
-		socket_help * sh = (socket_help *)arg;
-		#if 0
-		char report_device_info[256] = "report_device_info";
-		char heartbeat_info[256] = "heartbeat_info";
-		uint16_t report_len = strlen(report_device_info);
-		uint16_t heartbeat_len = strlen(heartbeat_info);
-		#endif
+		static uint8_t u8_flag = 0;
+		uint8_t rc522_index_start = '0';
+		uint8_t rc522_state_ok = '1';
+		uint8_t rc522_state_err = '0';
 		
 		uint8_t send_buf[256] = {0};
 		uint8_t *p = NULL;
 		uint16_t *p16 = NULL;
 		uint16_t send_len = 0;
-
-		uint8_t rc522_index_start = '0';
-		uint8_t rc522_state_ok = '1';
-		uint8_t rc522_state_err = '0';
-		write_log("[%d] terminal_id[%s]\n", sh->cli_index, sh->terminal_id.c_str());
-		//int input_num;
-		static uint8_t u8_i=0;
-		static uint8_t u8_j=0;
-		while(1)
-		{
-			//std::cout << "pls input a num, 2 is report device info, 3 is heartbeat\n";
-			//std::cin >> input_num;
+		
+		do{
+			p16 = (uint16_t *)send_buf;
+			*p16++ = htons(0x0103);
+			*(++p16)++ = htons(sh->send_msg_id);
+			sh->send_msg_id++;
+			*p16++ = htons(sh->terminal_id.length());
+			p=(uint8_t *)p16;
+			memcpy(p, sh->terminal_id.c_str(), sh->terminal_id.length());
+			p += sh->terminal_id.length();
+			*p++ = sh->rfid_id.size();
 			
-			//if(input_num == 2)
-			u8_j^=1;
-			if(u8_j==0)
+			u8_flag^=1;
+			for(uint8_t i=0;i<sh->rfid_id.size();i++)
 			{
-				int random_addr = time(NULL)%(sh->rfid_id.size());
-				write_log("[%d] rfid_id[index %d][%s]\n", sh->cli_index, random_addr, sh->rfid_id[random_addr].c_str());
-				#if 0
-				01 02 00 1D 00 00 00 0A 47 52 
-				7A 70 44 50 57 70 4E 6B 00 08 
-				68 44 51 35 6A 74 6A 30 00 
-				#endif
-				p16 = (uint16_t *)send_buf;
-				*p16++ = htons(0x0102);
-				*(++p16)++ = htons(sh->send_msg_id);
-				sh->send_msg_id++;
-				*p16++ = htons(sh->terminal_id.length());
-				p=(uint8_t *)p16;
-				memcpy(p, sh->terminal_id.c_str(), sh->terminal_id.length());
-				p += sh->terminal_id.length();
-				p16=(uint16_t *)p;
-				*p16++ = htons(sh->rfid_id[random_addr].length());
-				p=(uint8_t *)p16;
-				memcpy(p, sh->rfid_id[random_addr].c_str(), sh->rfid_id[random_addr].length());
-				p += sh->rfid_id[random_addr].length();
-				*p++ = random_addr;
-				send_len = p-send_buf;
-				send_buf[3] = send_len-4;
-				
-				if(sh->send_data(send_buf, send_len)) break;//reconnect
-				#if 0
-				p = send_buf;
-				*p++ = 0x01;
-				*p++ = 0x02;
-				*(p += 2)++ = (uint8_t)(sh->send_msg_id >> 8);
-				*p++ = (uint8_t)sh->send_msg_id;
-				sh->send_msg_id++;
-				*p++ = 0x00;
-				*p++ = sh->terminal_id.length();
-				memcpy(p, sh->terminal_id.c_str(), sh->terminal_id.length());
-				p += sh->terminal_id.length();
-				*p++ = 0x00;
-				*p++ = sh->rfid_id[random_addr].length();
-				memcpy(p, sh->rfid_id[random_addr].c_str(), sh->rfid_id[random_addr].length());
-				p += sh->rfid_id[random_addr].length();
-				*p++ = random_addr;
-				
-				send_len = p-send_buf;
-				send_buf[3] = send_len-4;
-
-				if(sh->send_data(send_buf, send_len)) break;//reconnect
-				#endif
-				write_log("[%d] write_thread report device info\n", sh->cli_index);
-				
-			}
-			//else if(input_num == 3)
-			else
-			{
-				#if 0
-				01 03 00 1D 00 01 00 0A 47 52 
-				7A 70 44 50 57 70 4E 6B 05 30 
-				31 31 30 32 31 33 30 34 31
-				#endif
-				p = send_buf;
-				*p++ = 0x01;
-				*p++ = 0x03;
-				*(p += 2)++ = (uint8_t)(sh->send_msg_id >> 8);
-				*p++ = (uint8_t)sh->send_msg_id;
-				sh->send_msg_id++;
-				*p++ = 0x00;
-				*p++ = sh->terminal_id.length();
-				memcpy(p, sh->terminal_id.c_str(), sh->terminal_id.length());
-				p += sh->terminal_id.length();
-				
-				*p++ = sh->rfid_id.size();
-				
-				u8_i^=1;
-				for(uint16_t i=0;i<sh->rfid_id.size();i++)
-				{
-					*p++ = i+ rc522_index_start;
-					if(u8_i) *p++ = rc522_state_ok;
-					else{
-						if(i%2==0) *p++ = rc522_state_ok;
-						else *p++ = rc522_state_err;
-					}
+				*p++ = i+ rc522_index_start;
+				if(u8_flag) *p++ = rc522_state_ok;
+				else{
+					if(i%2==0) *p++ = rc522_state_ok;
+					else *p++ = rc522_state_err;
 				}
-				
-				send_len = p-send_buf;
-				send_buf[3] = send_len-4;
-				if(sh->send_data(send_buf, send_len)) break;//reconnect
-				write_log("[%d] write_thread heartbeat\n", sh->cli_index);
 			}
-			sleep(10);
-			//else
-			//{
-			//	printf("[%d] write_thread error input num %d\n", sh->cli_index, input_num);
-			//}
+			
+			send_len = p-send_buf;
+			send_buf[3] = send_len-4;
+			if(sh->send_data(send_buf, send_len)) break;//reconnect
+			write_log("[%d] write_thread heartbeat\n", sh->cli_index);
+			
+			if(while_flag) sleep(60);
+		}while(while_flag);
+	}
+
+	static void send_report_device(socket_help * sh, bool while_flag)
+	{
+		uint8_t send_buf[256] = {0};
+		uint8_t *p = NULL;
+		uint16_t *p16 = NULL;
+		uint16_t send_len = 0;
+
+		int random_addr = 0;
+		
+		do{
+			random_addr = time(NULL)%(sh->rfid_id.size());
+			write_log("[%d] rfid_id[index %d][%s]\n", sh->cli_index, random_addr, sh->rfid_id[random_addr].c_str());
+
+			p16 = (uint16_t *)send_buf;
+			*p16++ = htons(0x0102);
+			*(++p16)++ = htons(sh->send_msg_id);
+			sh->send_msg_id++;
+			*p16++ = htons(sh->terminal_id.length());
+			p=(uint8_t *)p16;
+			memcpy(p, sh->terminal_id.c_str(), sh->terminal_id.length());
+			p += sh->terminal_id.length();
+			p16=(uint16_t *)p;
+			*p16++ = htons(sh->rfid_id[random_addr].length());
+			p=(uint8_t *)p16;
+			memcpy(p, sh->rfid_id[random_addr].c_str(), sh->rfid_id[random_addr].length());
+			p += sh->rfid_id[random_addr].length();
+			*p++ = random_addr;
+			send_len = p-send_buf;
+			send_buf[3] = send_len-4;
+			
+			if(sh->send_data(send_buf, send_len)) break;//reconnect
+
+			write_log("[%d] write_thread report device info\n", sh->cli_index);
+			
+			if(while_flag) sleep(10);
+		}while(while_flag);
+	}
+	
+	static void write_thread(socket_help * sh)
+	{
+		std::thread (send_heartbeat, sh, true).detach();
+
+		if(sh->stress_test > 1) 
+		{
+			write_log("[%d] terminal_id[%s] stress test\n", sh->cli_index, sh->terminal_id.c_str());
+			std::thread t1 (send_report_device, sh, true);
+			t1.join();
 		}
+		else
+		{
+			write_log("[%d] terminal_id[%s] debug test\n", sh->cli_index, sh->terminal_id.c_str());
+			string input_str;
+			int input_num;
+			while(1)
+			{
+				std::cout << "pls input a num, 2 is report device info, 3 is heartbeat\n";
+				input_str.clear();
+				std::cin >> input_str;
+				try{
+					input_num = std::stoi(input_str, NULL);
+				}
+				catch(std::invalid_argument &ia)
+				{
+					write_log("[%d] Invalid_argument : [%s]\n", sh->cli_index, ia.what());
+					input_num = 0;
+				}
+				if(input_num == 2) std::thread (send_report_device, sh, false).detach();
+				else if(input_num == 3) std::thread (send_heartbeat, sh, false).detach();
+				else fprintf(stderr, "[%d] write_thread error input str [%s]\n", sh->cli_index, input_str.c_str());
+			}
+		}
+		
 		printf("[%d] write_thread exit\n", sh->cli_index);
 		write_log("[%d] write_thread exit\n", sh->cli_index);
 	}
 
-	int init_socket()
+	int init_socket(int argc)
 	{
+		stress_test = argc;
 		signal(SIGPIPE,SIG_IGN);
 		servaddr.sin_family = AF_INET;
 		servaddr.sin_port = htons(port);
@@ -700,14 +697,14 @@ class socket_help{
 		for(auto ip:vec_ip){
 			if(inet_pton(AF_INET, ip.c_str(), &servaddr.sin_addr) <= 0)
 			{
-				printf("[%d] inet_pton error\n", cli_index);
+				fprintf(stderr, "[%d] inet_pton error\n", cli_index);
 				write_log("[%d] inet_pton error\n", cli_index);
 				continue;
 			}
 			
 			if((sockfd = socket(AF_INET, SOCK_STREAM, 0)) < 0)
 			{
-				printf("[%d] create socket error\n", cli_index);
+				fprintf(stderr, "[%d] create socket error\n", cli_index);
 				write_log("[%d] create socket error\n", cli_index);
 				continue;
 			}
@@ -717,7 +714,7 @@ class socket_help{
 			
 			if(connect(sockfd, (struct sockaddr*)&servaddr, sizeof(servaddr)) < 0)
 			{
-				printf("[%d] connect error: %s(errno: %d)\n", cli_index, strerror(errno), errno);
+				fprintf(stderr, "[%d] connect error: %s(errno: %d)\n", cli_index, strerror(errno), errno);
 				write_log("[%d] connect error: %s(errno: %d)\n", cli_index, strerror(errno), errno);
 				continue;
 			}
@@ -750,6 +747,7 @@ class socket_help{
 	vector<string> rfid_id;
 	uint16_t send_msg_id;
 	uint16_t recv_msg_id;
+	int stress_test;
 		
 };
 #endif

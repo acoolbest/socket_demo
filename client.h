@@ -259,7 +259,12 @@ class domain_to_ip{
 				 write_log("dns create socket error!\n ");
 				 continue;
 			}
-			
+
+			timeval tv = {3, 0};
+			if(setsockopt(servfd, SOL_SOCKET, SO_RCVTIMEO, (char*)&tv, sizeof(timeval))!=0) {
+				continue;
+			}
+
 			int len = sendto(servfd, buf, sizeof(DNS_HDR) + sizeof(DNS_QER) + str_domain.length() + 2, 0, (struct sockaddr *)&servaddr, sizeof(servaddr));
 			if(len < 0)
 			{
@@ -611,17 +616,23 @@ class socket_help{
 		}while(while_flag);
 	}
 
-	static void send_report_device(socket_help * sh, bool while_flag)
+	static void send_report_device(socket_help * sh, bool while_flag, uint8_t rfid_index)
 	{
 		uint8_t send_buf[256] = {0};
 		uint8_t *p = NULL;
 		uint16_t *p16 = NULL;
 		uint16_t send_len = 0;
 
-		int random_addr = 0;
+		uint8_t random_addr = 0;
 		
 		do{
-			random_addr = time(NULL)%(sh->rfid_id.size());
+			random_addr = while_flag ? (time(NULL)%(sh->rfid_id.size())) : rfid_index;
+			if(random_addr >= sh->rfid_id.size())
+			{
+				fprintf(stderr, "[%d] rfid_id[index %d] overflow!\n", sh->cli_index, random_addr);
+				write_log("[%d] rfid_id[index %d] overflow!\n", sh->cli_index, random_addr);
+				break;
+			}
 			write_log("[%d] rfid_id[index %d][%s]\n", sh->cli_index, random_addr, sh->rfid_id[random_addr].c_str());
 
 			p16 = (uint16_t *)send_buf;
@@ -648,6 +659,23 @@ class socket_help{
 			if(while_flag) sleep(10);
 		}while(while_flag);
 	}
+
+	int get_line_number_to_int()
+	{
+		string input_str = "";
+		int input_num = 0;
+		std::cin >> input_str;
+		try{
+			input_num = std::stoi(input_str, NULL);
+		}
+		catch(std::invalid_argument &ia)
+		{
+			write_log("[%d] Invalid_argument : [%s]\n", cli_index, ia.what());
+			input_num = -1;
+			fprintf(stderr, "[%d] error input str [%s]\n", cli_index, input_str.c_str());
+		}
+		return input_num;
+	}
 	
 	static void write_thread(socket_help * sh)
 	{
@@ -656,33 +684,44 @@ class socket_help{
 		if(sh->stress_test > 1) 
 		{
 			write_log("[%d] terminal_id[%s] stress test\n", sh->cli_index, sh->terminal_id.c_str());
-			std::thread t1 (send_report_device, sh, true);
+			std::thread t1 (send_report_device, sh, true, 0);
 			t1.join();
 		}
 		else
 		{
 			write_log("[%d] terminal_id[%s] debug test\n", sh->cli_index, sh->terminal_id.c_str());
-			string input_str;
-			int input_num;
+
+			int input_num = 0;
+
 			while(1)
 			{
 				std::cout << "pls input a num, 2 is report device info, 3 is heartbeat\n";
-				input_str.clear();
-				std::cin >> input_str;
-				try{
-					input_num = std::stoi(input_str, NULL);
-				}
-				catch(std::invalid_argument &ia)
+				input_num = sh->get_line_number_to_int();
+
+				if(input_num == 2)
 				{
-					write_log("[%d] Invalid_argument : [%s]\n", sh->cli_index, ia.what());
-					input_num = 0;
+					while(1)
+					{
+						std::cout << "pls input a num, range from 0 to " << sh->rfid_id.size()-1 << ", stand for the rfid_index\n";
+						std::cout << "if the input num overflow the range, it will quit this module\n";
+						input_num = sh->get_line_number_to_int();
+						if(input_num < 0) continue;
+
+						if(static_cast<uint8_t>(input_num) >= sh->rfid_id.size())
+						{
+							fprintf(stderr, "[%d] input_num [%d], overflow! quit this module\n", sh->cli_index, input_num);
+							input_num = 0;
+							break;
+						}
+
+						std::thread (send_report_device, sh, false, input_num).detach();
+					}
 				}
-				if(input_num == 2) std::thread (send_report_device, sh, false).detach();
 				else if(input_num == 3) std::thread (send_heartbeat, sh, false).detach();
-				else fprintf(stderr, "[%d] write_thread error input str [%s]\n", sh->cli_index, input_str.c_str());
+				else fprintf(stderr, "[%d] write_thread error input_num [%d]\n", sh->cli_index, input_num);
 			}
 		}
-		
+
 		printf("[%d] write_thread exit\n", sh->cli_index);
 		write_log("[%d] write_thread exit\n", sh->cli_index);
 	}
